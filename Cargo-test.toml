@@ -1,0 +1,8 @@
+[package]
+name = "trevailo-miner"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+ocl = "0.19"
+cl-sys = { version = "0.4", features = ["dynamic"] }
