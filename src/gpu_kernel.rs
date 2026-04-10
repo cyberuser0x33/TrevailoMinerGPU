@@ -1,4 +1,6 @@
 pub const SHA256_KERNEL: &str = r#"
+#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
+
 #define ROTRIGHT(a,b) (((a) >> (b)) | ((a) << (32-(b))))
 #define CH(x,y,z) (((x) & (y)) ^ (~(x) & (z)))
 #define MAJ(x,y,z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
@@ -18,100 +20,89 @@ __constant uint k[64] = {
     0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
 };
 
-void sha256_transform(uint *state, const uint *data) {
-    uint a, b, c, d, e, f, g, h, i, T1, T2;
-    uint m[64];
-
-    for (i = 0; i < 16; ++i)
-        m[i] = data[i];
-    for ( ; i < 64; ++i)
-        m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
-
-    a = state[0]; b = state[1]; c = state[2]; d = state[3];
-    e = state[4]; f = state[5]; g = state[6]; h = state[7];
-
-    for (i = 0; i < 64; ++i) {
-        T1 = h + EP1(e) + CH(e,f,g) + k[i] + m[i];
-        T2 = EP0(a) + MAJ(a,b,c);
-        h = g; g = f; f = e; e = d + T1;
-        d = c; c = b; b = a; a = T1 + T2;
-    }
-
-    state[0] += a; state[1] += b; state[2] += c; state[3] += d;
-    state[4] += e; state[5] += f; state[6] += g; state[7] += h;
-}
-
-// Из Rust мы получаем 152 байта заголовка + target.
-// GPU вставляет свой nonce в последние 8 байт, делает pad до 192 байт и хеширует 3 чанка.
 __kernel void mine(
-    __global const uchar* header_in,
-    __global const uchar* target_in,
+    __global const uint* midstate_in,
+    __global const uint* tail_data_in,
+    __global const uint* target_in,
     __global ulong* out_nonces,
     __global uint* out_count,
     ulong base_nonce
 ) {
     ulong nonce = base_nonce + get_global_id(0);
-
-    // Подготовка буфера на 192 байта (3 блока по 64)
-    uchar buf[192];
-    for (int i=0; i<152; i++) {
-        buf[i] = header_in[i];
-    }
     
-    // Вставляем nonce (little endian)
+    uint state[8];
+    state[0] = midstate_in[0];
+    state[1] = midstate_in[1];
+    state[2] = midstate_in[2];
+    state[3] = midstate_in[3];
+    state[4] = midstate_in[4];
+    state[5] = midstate_in[5];
+    state[6] = midstate_in[6];
+    state[7] = midstate_in[7];
+
+    uint m[64];
+    m[0] = tail_data_in[0];
+    m[1] = tail_data_in[1];
+    m[2] = tail_data_in[2];
+    m[3] = tail_data_in[3];
+    m[4] = tail_data_in[4];
+    m[5] = tail_data_in[5];
+    // words 6 & 7 contain the little-endian nonce encoded into big-endian struct
+    m[6] = ((nonce & 0xFF) << 24) | (((nonce >> 8) & 0xFF) << 16) | (((nonce >> 16) & 0xFF) << 8) | ((nonce >> 24) & 0xFF);
+    m[7] = (((nonce >> 32) & 0xFF) << 24) | (((nonce >> 40) & 0xFF) << 16) | (((nonce >> 48) & 0xFF) << 8) | ((nonce >> 56) & 0xFF);
+    
+    m[8] = tail_data_in[8]; // 0x80000000
+    m[9] = 0;  m[10] = 0; m[11] = 0;
+    m[12] = 0; m[13] = 0; m[14] = 0;
+    m[15] = tail_data_in[15]; // length in bits (1280)
+
+    #pragma unroll
+    for(int i = 16; i < 64; ++i) {
+        m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
+    }
+
+    uint a = state[0];
+    uint b = state[1];
+    uint c = state[2];
+    uint d = state[3];
+    uint e = state[4];
+    uint f = state[5];
+    uint g = state[6];
+    uint h = state[7];
+
+    #pragma unroll
+    for(int i = 0; i < 64; ++i) {
+        uint temp1 = h + EP1(e) + CH(e,f,g) + k[i] + m[i];
+        uint temp2 = EP0(a) + MAJ(a,b,c);
+        h = g;
+        g = f;
+        f = e;
+        e = d + temp1;
+        d = c;
+        c = b;
+        b = a;
+        a = temp1 + temp2;
+    }
+
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += h;
+
+    bool passed = true;
+    #pragma unroll
     for (int i=0; i<8; i++) {
-        buf[152+i] = (uchar)((nonce >> (i * 8)) & 0xFF);
+        uint s = state[i];
+        uint t = target_in[i];
+        if (s > t) { passed = false; break; }
+        if (s < t) { break; }
     }
 
-    // Паддинг (0x80 ... длина в битах: 160 * 8 = 1280 (0x0500))
-    buf[160] = 0x80;
-    for (int i=161; i<188; i++) {
-        buf[i] = 0x00;
-    }
-    buf[188] = 0x00;
-    buf[189] = 0x00;
-    buf[190] = 0x05;
-    buf[191] = 0x00;
-
-    // Конвертируем байты в 32-битные слова Big-Endian
-    uint data[48];
-    for (int i = 0; i < 48; i++) {
-        data[i] = (buf[i*4] << 24) | (buf[i*4+1] << 16) | (buf[i*4+2] << 8) | buf[i*4+3];
-    }
-
-    // SHA-256 Init State
-    uint state[8] = {
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-    };
-
-    sha256_transform(state, &data[0]);
-    sha256_transform(state, &data[16]);
-    sha256_transform(state, &data[32]);
-
-    // Конвертация Final State обратно в байты (Big Endian sequence)
-    uchar hash[32];
-    for(int i=0; i<8; i++) {
-        hash[i*4+0] = (state[i] >> 24) & 0xFF;
-        hash[i*4+1] = (state[i] >> 16) & 0xFF;
-        hash[i*4+2] = (state[i] >> 8) & 0xFF;
-        hash[i*4+3] = (state[i]) & 0xFF;
-    }
-
-    // Сравнение с Target (Лексикографическое сравнение массивов)
-    bool won = true;
-    for (int i=0; i<32; i++) {
-        if (hash[i] < target_in[i]) {
-            won = true;
-            break;
-        } else if (hash[i] > target_in[i]) {
-            won = false;
-            break;
-        }
-    }
-
-    if (won) {
-        // Атомарно увеличиваем счетчик и сохраняем выигрышный nonce
+    if (passed) {
         uint idx = atomic_inc(out_count);
         if (idx < 10) {
             out_nonces[idx] = nonce;

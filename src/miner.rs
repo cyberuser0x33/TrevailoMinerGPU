@@ -11,10 +11,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::http::NodeClient;
+use crate::i18n::Translator;
 
 const TEMPLATE_POLL_SECS: u64 = 5;
 const BATCH_SIZE_CPU: u64 = 50_000;
-const BATCH_SIZE_GPU: usize = 1_048_576; // 1 миллион хэшей за оборот
+const BATCH_SIZE_GPU: usize = 4_194_304; // 4 миллиона хэшей за оборот
 
 #[derive(Debug, Clone)]
 pub enum MineEvent {
@@ -23,6 +24,7 @@ pub enum MineEvent {
     BlockAccepted { height: u64, reward_tvc: f64, txs: usize },
     BlockRejected { reason: String },
     TemplateSwap { old_height: u64, new_height: u64 },
+    Info { msg: String },
     Error { msg: String },
 }
 
@@ -51,13 +53,14 @@ impl MinerHandle {
         address: String,
         num_threads: usize,
         use_gpu: bool,
+        tr: Arc<Translator>,
     ) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(MinerState { running: true, ..Default::default() }));
         let events = Arc::new(Mutex::new(Vec::<MineEvent>::new()));
 
         let (sf, st, ev) = (stop_flag.clone(), state.clone(), events.clone());
-        thread::spawn(move || mining_main(node_url, address, num_threads, use_gpu, sf, st, ev));
+        thread::spawn(move || mining_main(node_url, address, num_threads, use_gpu, sf, st, ev, tr));
 
         MinerHandle { stop_flag, state, events }
     }
@@ -107,7 +110,7 @@ fn header_hash_string(h: &BlockHeader) -> String {
     hex::encode(s.finalize())
 }
 
-fn create_midstate(h: &BlockHeader) -> Sha256 {
+fn create_midstate_sha2(h: &BlockHeader) -> Sha256 {
     let mut s = Sha256::new();
     s.update(h.version.to_le_bytes());
     s.update(h.height.to_le_bytes());
@@ -139,6 +142,60 @@ fn difficulty_to_target(difficulty: u32) -> [u8; 32] {
     t
 }
 
+// Ручное вычисление SHA-256 состояния (Midstate) после обработки 128 байт.
+fn sha256_midstate(data: &[u8; 128]) -> [u32; 8] {
+    let mut state: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+    let k: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+
+    for chunk in data.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes(chunk[i * 4..(i + 1) * 4].try_into().unwrap());
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+
+        let mut a = state[0]; let mut b = state[1]; let mut c = state[2]; let mut d = state[3];
+        let mut e = state[4]; let mut f = state[5]; let mut g = state[6]; let mut h = state[7];
+
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ (!e & g);
+            let temp1 = h.wrapping_add(s1).wrapping_add(ch).wrapping_add(k[i]).wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+
+            h = g; g = f; f = e; e = d.wrapping_add(temp1); d = c; c = b; b = a; a = temp1.wrapping_add(temp2);
+        }
+
+        state[0] = state[0].wrapping_add(a);
+        state[1] = state[1].wrapping_add(b);
+        state[2] = state[2].wrapping_add(c);
+        state[3] = state[3].wrapping_add(d);
+        state[4] = state[4].wrapping_add(e);
+        state[5] = state[5].wrapping_add(f);
+        state[6] = state[6].wrapping_add(g);
+        state[7] = state[7].wrapping_add(h);
+    }
+    state
+}
+
 struct SharedTemplate {
     block: Block,
     version: u64,
@@ -163,7 +220,7 @@ fn cpu_pow_thread(
         (t.block.clone(), t.version)
     };
     let mut target = difficulty_to_target(local_block.header.difficulty);
-    let mut midstate = create_midstate(&local_block.header);
+    let mut midstate_sha2 = create_midstate_sha2(&local_block.header);
     
     // CPU берет старшую половину возможных Nonce, чтобы не пересекаться с GPU
     let mut nonce = (u64::MAX / 2).wrapping_add(tid as u64);
@@ -179,7 +236,7 @@ fn cpu_pow_thread(
         }
 
         for _ in 0..BATCH_SIZE_CPU {
-            let mut hasher = midstate.clone();
+            let mut hasher = midstate_sha2.clone();
             hasher.update(nonce.to_le_bytes());
             let hash = hasher.finalize();
 
@@ -202,7 +259,7 @@ fn cpu_pow_thread(
                 local_version = t.version;
                 local_block = t.block.clone();
                 target = difficulty_to_target(local_block.header.difficulty);
-                midstate = create_midstate(&local_block.header);
+                midstate_sha2 = create_midstate_sha2(&local_block.header);
                 nonce = (u64::MAX / 2).wrapping_add(tid as u64);
             }
         }
@@ -221,6 +278,7 @@ fn gpu_pow_thread(
     hashes_ctr: Arc<AtomicU64>,
     nonce_ctr: Arc<AtomicU64>,
     events: Arc<Mutex<Vec<MineEvent>>>,
+    tr: Arc<Translator>,
 ) {
     use opencl3::device::{get_all_devices, Device, CL_DEVICE_TYPE_GPU};
     use opencl3::context::Context;
@@ -228,18 +286,24 @@ fn gpu_pow_thread(
     use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_WRITE_ONLY, CL_MEM_READ_WRITE};
     use opencl3::program::Program;
     use opencl3::kernel::{Kernel, ExecuteKernel};
-    use opencl3::types::{cl_uchar, cl_ulong, cl_uint, CL_BLOCKING};
+    use opencl3::types::{cl_ulong, cl_uint, CL_BLOCKING};
 
     let device_ids = get_all_devices(CL_DEVICE_TYPE_GPU).unwrap_or_default();
     if device_ids.is_empty() {
-        push(&events, MineEvent::Error { msg: "GPU Инициализация не удалась: Нет доступных GPU (OpenCL)".into() });
+        push(&events, MineEvent::Error { 
+            msg: tr.t("err_no_gpu", "GPU Initialization failed: No OpenCL GPUs available", &[]) 
+        });
         return;
     }
 
     let device_id = device_ids[0];
     let device = Device::new(device_id);
     let dev_name = device.name().unwrap_or("Unknown GPU".into());
-    push(&events, MineEvent::Error { msg: format!("✅ GPU ИНИЦИАЛИЗИРОВАН УСПЕШНО: {}", dev_name) });
+    
+    // Используем вариант MineEvent::Info, а не Error
+    push(&events, MineEvent::Info { 
+        msg: tr.t("info_gpu_ok", "✅ GPU INITIALIZED SUCCESSFULLY: {dev}", &[("dev", &dev_name)]) 
+    });
 
     let context = Context::from_device(&device).expect("Context::from_device failed");
     let queue = CommandQueue::create_default_with_properties(&context, 0, 0).expect("CommandQueue failed");
@@ -251,10 +315,11 @@ fn gpu_pow_thread(
     
     let kernel = Kernel::create(&program, "mine").expect("Kernel::create failed");
 
-    let (mut header_buf, mut target_buf, nonces_buf, mut count_buf) = unsafe {
+    let (mut midstate_buf, mut tail_data_buf, mut target_buf, nonces_buf, mut count_buf) = unsafe {
         (
-            Buffer::<cl_uchar>::create(&context, CL_MEM_READ_ONLY, 152, std::ptr::null_mut()).unwrap(),
-            Buffer::<cl_uchar>::create(&context, CL_MEM_READ_ONLY, 32, std::ptr::null_mut()).unwrap(),
+            Buffer::<cl_uint>::create(&context, CL_MEM_READ_ONLY, 8, std::ptr::null_mut()).unwrap(),
+            Buffer::<cl_uint>::create(&context, CL_MEM_READ_ONLY, 16, std::ptr::null_mut()).unwrap(),
+            Buffer::<cl_uint>::create(&context, CL_MEM_READ_ONLY, 8, std::ptr::null_mut()).unwrap(),
             Buffer::<cl_ulong>::create(&context, CL_MEM_WRITE_ONLY, 10, std::ptr::null_mut()).unwrap(),
             Buffer::<cl_uint>::create(&context, CL_MEM_READ_WRITE, 1, std::ptr::null_mut()).unwrap(),
         )
@@ -266,11 +331,26 @@ fn gpu_pow_thread(
     };
     
     let mut b_target = difficulty_to_target(local_block.header.difficulty);
+    let mut target_u32 = [0u32; 8];
+    for i in 0..8 {
+        target_u32[i] = u32::from_be_bytes(b_target[i*4..(i+1)*4].try_into().unwrap());
+    }
+
     let mut b_header = header_bytes_152(&local_block.header);
+    let mut b_midstate = sha256_midstate(b_header[0..128].try_into().unwrap());
+    
+    let mut tail_data = [0u32; 16];
+    let tail_bytes = &b_header[128..152];
+    for i in 0..6 {
+        tail_data[i] = u32::from_be_bytes(tail_bytes[i*4..(i+1)*4].try_into().unwrap());
+    }
+    tail_data[8] = 0x80000000;
+    tail_data[15] = 1280;
 
     // Initial explicit block write (Blocking)
-    let _ = unsafe { queue.enqueue_write_buffer(&mut header_buf, CL_BLOCKING, 0, &b_header, &[]) }.unwrap();
-    let _ = unsafe { queue.enqueue_write_buffer(&mut target_buf, CL_BLOCKING, 0, &b_target, &[]) }.unwrap();
+    let _ = unsafe { queue.enqueue_write_buffer(&mut midstate_buf, CL_BLOCKING, 0, &b_midstate, &[]) }.unwrap();
+    let _ = unsafe { queue.enqueue_write_buffer(&mut tail_data_buf, CL_BLOCKING, 0, &tail_data, &[]) }.unwrap();
+    let _ = unsafe { queue.enqueue_write_buffer(&mut target_buf, CL_BLOCKING, 0, &target_u32, &[]) }.unwrap();
 
     let mut base_nonce = 0u64; // GPU проверяет младшую половину
 
@@ -289,7 +369,8 @@ fn gpu_pow_thread(
 
         let execute_event = unsafe {
             ExecuteKernel::new(&kernel)
-                .set_arg(&header_buf)
+                .set_arg(&midstate_buf)
+                .set_arg(&tail_data_buf)
                 .set_arg(&target_buf)
                 .set_arg(&nonces_buf)
                 .set_arg(&count_buf)
@@ -327,10 +408,22 @@ fn gpu_pow_thread(
                 local_version = t.version;
                 local_block = t.block.clone();
                 b_target = difficulty_to_target(local_block.header.difficulty);
+                for i in 0..8 {
+                    target_u32[i] = u32::from_be_bytes(b_target[i*4..(i+1)*4].try_into().unwrap());
+                }
+
                 b_header = header_bytes_152(&local_block.header);
+                b_midstate = sha256_midstate(b_header[0..128].try_into().unwrap());
                 
-                let _ = unsafe { queue.enqueue_write_buffer(&mut header_buf, CL_BLOCKING, 0, &b_header, &[]) }.unwrap();
-                let _ = unsafe { queue.enqueue_write_buffer(&mut target_buf, CL_BLOCKING, 0, &b_target, &[]) }.unwrap();
+                let tail_bytes = &b_header[128..152];
+                for i in 0..6 {
+                    tail_data[i] = u32::from_be_bytes(tail_bytes[i*4..(i+1)*4].try_into().unwrap());
+                }
+                
+                // Передача обновленных данных
+                let _ = unsafe { queue.enqueue_write_buffer(&mut midstate_buf, CL_BLOCKING, 0, &b_midstate, &[]) }.unwrap();
+                let _ = unsafe { queue.enqueue_write_buffer(&mut tail_data_buf, CL_BLOCKING, 0, &tail_data, &[]) }.unwrap();
+                let _ = unsafe { queue.enqueue_write_buffer(&mut target_buf, CL_BLOCKING, 0, &target_u32, &[]) }.unwrap();
                 
                 base_nonce = 0;
             }
@@ -346,12 +439,13 @@ fn push(events: &Arc<Mutex<Vec<MineEvent>>>, ev: MineEvent) {
     if v.len() > 200 { v.remove(0); }
 }
 
-fn fetch_template(client: &NodeClient, address: &str) -> anyhow::Result<Block> {
+fn fetch_template(client: &NodeClient, address: &str, tr: &Translator) -> anyhow::Result<Block> {
+    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
     let tmpl: serde_json::Value = client.get(
-        &format!("/block_template?miner_address={}", address)
+        &format!("/block_template?miner_address={}&_t={}", address, ts)
     )?;
     let block: Block = serde_json::from_value(tmpl["block"].clone())
-        .map_err(|e| anyhow::anyhow!("Парсинг блока: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("{}", tr.t("err_parse", "Block parsing error: {err}", &[("err", &e.to_string())])))?;
     Ok(block)
 }
 
@@ -363,11 +457,14 @@ fn mining_main(
     stop: Arc<AtomicBool>,
     state: Arc<Mutex<MinerState>>,
     events: Arc<Mutex<Vec<MineEvent>>>,
+    tr: Arc<Translator>,
 ) {
     let client = match NodeClient::new(&node_url) {
         Ok(c) => c,
         Err(e) => {
-            push(&events, MineEvent::Error { msg: format!("Не удалось подключиться: {}", e) });
+            push(&events, MineEvent::Error { 
+                msg: tr.t("err_conn", "Failed to connect: {err}", &[("err", &e.to_string())]) 
+            });
             state.lock().unwrap().running = false;
             return;
         }
@@ -378,10 +475,12 @@ fn mining_main(
             state.lock().unwrap().running = false;
             return;
         }
-        match fetch_template(&client, &address) {
+        match fetch_template(&client, &address, &tr) {
             Ok(b) => break b,
             Err(e) => {
-                push(&events, MineEvent::Error { msg: format!("Шаблон: {}", e) });
+                push(&events, MineEvent::Error { 
+                    msg: tr.t("err_tmpl", "Template error: {err}", &[("err", &e.to_string())]) 
+                });
                 for _ in 0..40 {
                     if stop.load(Ordering::Relaxed) {
                         state.lock().unwrap().running = false;
@@ -416,13 +515,13 @@ fn mining_main(
     let mut pow_handles = Vec::new();
 
     if use_gpu {
-        let (tm, gs, ff, fn_, fv, hc, nc, ev_push) = (
+        let (tm, gs, ff, fn_, fv, hc, nc, ev_push, tr_gpu) = (
             shared_tmpl.clone(), stop.clone(),
             found_flag.clone(), found_nonce.clone(), found_version.clone(),
-            hashes_ctr.clone(), nonce_ctr.clone(), events.clone()
+            hashes_ctr.clone(), nonce_ctr.clone(), events.clone(), tr.clone()
         );
         pow_handles.push(thread::spawn(move || {
-            gpu_pow_thread(tm, gs, ff, fn_, fv, hc, nc, ev_push);
+            gpu_pow_thread(tm, gs, ff, fn_, fv, hc, nc, ev_push, tr_gpu);
         }));
     }
 
@@ -484,7 +583,7 @@ fn mining_main(
         {
             last_tmpl_check = Instant::now();
 
-            match fetch_template(&client, &address) {
+            match fetch_template(&client, &address, &tr) {
                 Ok(fresh) => {
                     let old_height = shared_tmpl.lock().unwrap().block.header.height;
                     if fresh.header.height != old_height {
@@ -503,7 +602,9 @@ fn mining_main(
                     }
                 }
                 Err(e) => {
-                    push(&events, MineEvent::Error { msg: format!("Watcher: {}", e) });
+                    push(&events, MineEvent::Error { 
+                        msg: tr.t("err_tmpl", "Watcher: {err}", &[("err", &e.to_string())]) 
+                    });
                 }
             }
         }
@@ -550,7 +651,7 @@ fn mining_main(
 
         if stop.load(Ordering::Relaxed) { break 'outer; }
 
-        match fetch_template(&client, &address) {
+        match fetch_template(&client, &address, &tr) {
             Ok(next) => {
                 let new_height = next.header.height;
                 let new_diff = next.header.difficulty;
@@ -565,7 +666,9 @@ fn mining_main(
                 push(&events, MineEvent::NewTemplate { height: new_height, difficulty: new_diff });
             }
             Err(e) => {
-                push(&events, MineEvent::Error { msg: format!("Следующий шаблон: {}", e) });
+                push(&events, MineEvent::Error { 
+                    msg: tr.t("err_next_tmpl", "Next template error: {err}", &[("err", &e.to_string())]) 
+                });
                 found_flag.store(false, Ordering::SeqCst);
             }
         }
