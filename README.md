@@ -3,7 +3,7 @@
   <a href="#english-version">English</a> | <a href="#русская-версия">Русский</a>
 </div>
 
-<h1 id="русская-версия">Trevailo Coin CLI Miner ⛏️</h1>
+<h1 id="русская-версия"><img src="https://raw.githubusercontent.com/cyberuser0x33/TrevailoMinerGPU/main/logo.jpg" width="50"> Trevailo Coin CLI Miner ⛏️</h1>
 
 Высокопроизводительный майнер для децентрализованной сети **Trevailo Coin** (TVC). Написан на языке Rust и предоставляет продвинутую гибридную архитектуру, разделяющую вычислительную нагрузку между центральным процессором (CPU) и видеокартой (GPU) через библиотеку [OpenCL](https://crates.io/crates/opencl3).
 
