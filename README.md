@@ -117,7 +117,7 @@ FDzKuezC76ifJcbqZhL5Ej8z4XPe59sPcghn24hxgp4L
 
 <br><br><br>
 
-<h1 id="english-version">Trevailo Coin CLI Miner ⛏️</h1>
+<h1 id="english-version"><img src="https://raw.githubusercontent.com/cyberuser0x33/TrevailoMinerGPU/main/logo.jpg" width="50"> Trevailo Coin CLI Miner ⛏️</h1>
 
 High-performance miner for the decentralized **Trevailo Coin** (TVC) network. Written in Rust, it provides an advanced hybrid architecture that distributes the computational load between the Central Processing Unit (CPU) and the Graphics Processing Unit (GPU) via the [OpenCL](https://crates.io/crates/opencl3) library.
 
