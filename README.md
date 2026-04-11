@@ -38,7 +38,7 @@
 
 1. Клонируйте репозиторий:
    ```bash
-   git clone https://github.com/Trevailo/trevailo-miner.git
+   https://github.com/cyberuser0x33/TrevailoMinerGPU.git
    cd trevailo-miner
    ```
 2. *(Опционально)* Если у вас возникла ошибка `LNK1181: OpenCL.lib` при сборке вручную (зависит от видеокарты), просто запустите PowerShell-скрипт:
