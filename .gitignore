@@ -1,2 +1,5 @@
 /target
+/release_files
 Cargo-test.toml
+Cargo-test.lock
+prepare_release.ps1

@@ -17,6 +17,8 @@ struct Config {
     threads: usize,
     use_gpu: bool,
     language: String,
+    #[serde(rename = "debugMode", default)]
+    pub debug_mode: bool,
 }
 
 impl Default for Config {
@@ -27,6 +29,7 @@ impl Default for Config {
             threads: cpu_count(),
             use_gpu: true,
             language: "en".into(),
+            debug_mode: false,
         }
     }
 }
@@ -35,8 +38,19 @@ fn cpu_count() -> usize {
     std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
 }
 
-fn main() -> anyhow::Result<()> {
+fn log_to_file(msg: &str) {
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("info.log")
+        .and_then(|mut f| {
+            use std::io::Write;
+            let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+            writeln!(f, "[TS: {}] {}", epoch, msg)
+        });
+}
 
+fn main() -> anyhow::Result<()> {
 
     const CONFIG_PATH: &str = "config.json";
 
@@ -52,6 +66,15 @@ fn main() -> anyhow::Result<()> {
     };
 
     let tr = Arc::new(Translator::new(&config.language));
+
+    if config.debug_mode {
+        log_to_file("\n--- Miner Started ---");
+        std::panic::set_hook(Box::new(|info| {
+            let msg = format!("PANIC: {}", info);
+            log_to_file(&msg);
+            eprintln!("{}", msg);
+        }));
+    }
 
     if !std::path::Path::new(CONFIG_PATH).exists() {
         println!("{}", tr.t("cfg_not_found", "[!] config.json not found. Creating a new one with defaults", &[]));
@@ -122,9 +145,13 @@ fn main() -> anyhow::Result<()> {
                     ]));
                 }
                 MineEvent::BlockRejected { reason } => {
-                    println!("{}", tr.t("block_rejected", "[-] Block rejected: {reason}", &[
+                    let s = tr.t("block_rejected", "[-] Block rejected: {reason}", &[
                         ("reason", &reason),
-                    ]));
+                    ]);
+                    println!("{}", s);
+                    if config.debug_mode {
+                        log_to_file(&s);
+                    }
                 }
                 MineEvent::TemplateSwap { old_height, new_height } => {
                     if old_height != new_height {
@@ -135,9 +162,13 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 MineEvent::Error { msg } => {
-                    println!("{}", tr.t("error_msg", "[!] Error: {msg}", &[
+                    let s = tr.t("error_msg", "[!] Error: {msg}", &[
                         ("msg", &msg),
-                    ]));
+                    ]);
+                    println!("{}", s);
+                    if config.debug_mode {
+                        log_to_file(&s);
+                    }
                 }
                 MineEvent::Info { msg } => {
                     println!("{}", tr.t("info_msg", "[i] Info: {msg}", &[
@@ -169,7 +200,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn fmt_hr(hps: f64) -> String {
-    if hps >= 1_000_000.0 { format!("{:.2} MH/s", hps / 1_000_000.0) }
+    if hps >= 1_000_000_000.0 { format!("{:.2} GH/s", hps / 1_000_000_000.0) }
+    else if hps >= 1_000_000.0 { format!("{:.2} MH/s", hps / 1_000_000.0) }
     else if hps >= 1_000.0 { format!("{:.2} KH/s", hps / 1_000.0) }
     else { format!("{:.0} H/s", hps) }
 }

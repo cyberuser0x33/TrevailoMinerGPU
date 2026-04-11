@@ -1,0 +1,8 @@
+{
+  "node_url": "http://31.131.21.11:8080",
+  "wallet_address": "TxWz73zsah3z5m1fLcUvYM63JA8713ajy3",
+  "threads": 8,
+  "use_gpu": true,
+  "language": "en",
+  "debugMode": false
+}

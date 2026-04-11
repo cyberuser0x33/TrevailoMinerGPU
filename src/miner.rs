@@ -610,7 +610,11 @@ fn mining_main(
         }
 
         if !found_flag.load(Ordering::Relaxed) { continue; }
-        if found_version.load(Ordering::SeqCst) != current_version { continue; }
+        if found_version.load(Ordering::SeqCst) != current_version { 
+            // If a thread somehow found a block for an older version right during a swap, discard it.
+            found_flag.store(false, Ordering::SeqCst);
+            continue; 
+        }
 
         let mut mined_block = {
             let t = shared_tmpl.lock().unwrap();
