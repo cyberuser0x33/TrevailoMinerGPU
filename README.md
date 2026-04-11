@@ -38,7 +38,7 @@
 
 1. Клонируйте репозиторий:
    ```bash
-   https://github.com/cyberuser0x33/TrevailoMinerGPU.git
+   git clone https://github.com/cyberuser0x33/TrevailoMinerGPU.git
    cd trevailo-miner
    ```
 2. *(Опционально)* Если у вас возникла ошибка `LNK1181: OpenCL.lib` при сборке вручную (зависит от видеокарты), просто запустите PowerShell-скрипт:
@@ -152,7 +152,7 @@ The project uses dynamic linking for `opencl3` and is easily built on Windows wi
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Trevailo/trevailo-miner.git
+   git clone https://github.com/cyberuser0x33/TrevailoMinerGPU.git
    cd trevailo-miner
    ```
 2. *(Optional)* If you get the `LNK1181: OpenCL.lib` error during manual build (depends on the graphics card), just run the PowerShell script:
