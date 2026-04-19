@@ -77,7 +77,7 @@ cargo build --release
 
 ```json
 {
-  "node_url": "http://31.131.21.11:8080",
+  "node_url": "http://45.83.194.106:8080",
   "wallet_address": "TxWz...Ваш_Адрес...",
   "threads": 8,
   "use_gpu": true,
@@ -191,7 +191,7 @@ Stop the miner (Ctrl+C), open `config.json` in any text editor, and configure it
 
 ```json
 {
-  "node_url": "http://31.131.21.11:8080",
+  "node_url": "http://45.83.194.106:8080",
   "wallet_address": "TxWz...Your_Address...",
   "threads": 8,
   "use_gpu": true,
