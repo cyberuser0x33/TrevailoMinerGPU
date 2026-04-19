@@ -24,7 +24,7 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            node_url: "http://31.131.21.11:8080".into(),
+            node_url: "http://45.83.194.106:8080".into(),
             wallet_address: "TxWz73zsah3z5m1fLcUvYM63JA8713ajy3".into(),
             threads: cpu_count(),
             use_gpu: true,
