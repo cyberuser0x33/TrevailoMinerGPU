@@ -53,11 +53,7 @@
 > **Совет для публикации (Maintainers):** Если вы хотите собрать `.exe` файл, который будет выложен в GitHub Releases для всех желающих, убедитесь, что в файле `.cargo/config.toml` ВЫКЛЮЧЕН флаг `"-C", "target-cpu=native"`. Этот флаг оптимизирует бинарник исключительно под "ваш" процессор (например, AVX2), что может вызвать ошибку `Illegal Instruction` у пользователей со старыми ПК. Для личного использования — включайте его для ультимативного 🚀 хешрейта!
 
 ## 🛠️ Сборка из исходников (Linux 🐧)
-
-### ❗ Внимание: проект пока что не тестировался на Linux системах.
-Теоретически можно собрать так:
 (Ubuntu/Debian)
-
 
 Установка зависимостей:
 ```bash
@@ -169,11 +165,7 @@ The project uses dynamic linking for `opencl3` and is easily built on Windows wi
 > **Tip for publishing (Maintainers):** If you want to build an `.exe` file to be published in GitHub Releases for everyone, ensure that the `"-C", "target-cpu=native"` flag in the `.cargo/config.toml` file is TURNED OFF. This flag optimizes the binary exclusively for "your" processor (e.g., AVX2), which can cause an `Illegal Instruction` error for users with older PCs. For personal use — turn it on for ultimate 🚀 hashrate!
 
 ## 🛠️ Building from Source (Linux 🐧)
-
-### ❗ Warning: the project has not yet been tested on Linux systems.
-Theoretically, it can be built like this:
 (Ubuntu/Debian)
-
 
 Install dependencies:
 ```bash
