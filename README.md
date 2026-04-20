@@ -21,7 +21,7 @@
 ## Чек-лист проекта
 - Системная поддержка 
   - (Windows) ✅
-  - (Linux) ❌ (в процессе разработки)
+  - (Linux) ✅
 - Языковой пакет ✅ 10+ языков включая (китайский и арабский)
 - Оптимизированный код ✅
 ---
@@ -81,6 +81,7 @@ cargo build --release
   "wallet_address": "TxWz...Ваш_Адрес...",
   "threads": 8,
   "use_gpu": true,
+  "debugMode": false,
   "language": "ru"
 }
 ```
@@ -89,6 +90,7 @@ cargo build --release
 * `wallet_address` — Кошелек, на который будут зачисляться добытые монеты TVC (награда за найденный блок).
 * `threads` — Количество логических потоков CPU, выделяемых под майнинг. По умолчанию — все доступные. (Если система перегревается, уменьшите это значение).
 * `use_gpu` — `true` включает параллельный майнинг на видеокарте (по умолчанию - true).
+* `debugMode` — `true` выводит подробные логи для отладки и поиска проблем (по умолчанию - false).
 * `language` — Поддержка множества языков. Укажите `ru`, `uk`, `de`, `es`, `zh` и т.д. (Требует наличия файла `languagepack.json` в папке с майнером).
 ---
 ## Поддержать автора 💰
@@ -135,7 +137,7 @@ High-performance miner for the decentralized **Trevailo Coin** (TVC) network. Wr
 ## Project Checklist
 - System support 
   - (Windows) ✅
-  - (Linux) ❌ (in development)
+  - (Linux) ✅
 - Language pack ✅ 10+ languages including (Chinese and Arabic)
 - Optimized code ✅
 ---
@@ -195,6 +197,7 @@ Stop the miner (Ctrl+C), open `config.json` in any text editor, and configure it
   "wallet_address": "TxWz...Your_Address...",
   "threads": 8,
   "use_gpu": true,
+  "debugMode": false,
   "language": "en"
 }
 ```
@@ -203,6 +206,7 @@ Stop the miner (Ctrl+C), open `config.json` in any text editor, and configure it
 * `wallet_address` — The wallet to which mined TVC coins will be credited (reward for a found block).
 * `threads` — The number of logical CPU threads allocated for mining. By default — all available. (If the system overheats, reduce this value).
 * `use_gpu` — `true` enables parallel mining on the graphics card (true by default).
+* `debugMode` — `true` enables detailed logs for debugging and troubleshooting (false by default).
 * `language` — Multilanguage support. Specify `en`, `ru`, `uk`, `de`, `es`, `zh`, etc. (Requires the `languagepack.json` file in the miner folder).
 ---
 ## Support the author 💰
